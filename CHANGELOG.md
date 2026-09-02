@@ -6,6 +6,7 @@ All notable changes to `@sting8k/pi-vcc` are documented in this file.
 
 ### Fixes
 
+- **Compaction: make automatic continuation visible** - A successful automatic compaction now resumes with the user message `your context was compacted, you now have tons of space to keep working as long as you like`. The message replaces the hidden empty continuation, so transcripts explain why the prior model request was aborted and agents know they have room to keep working. Pi receives it before the compaction callback returns, which avoids the delayed ghost turn fixed in 0.7.1.
 - **Compaction: guard long tool loops between provider requests** - Pi checks its automatic compaction threshold after the complete agent run. A model that keeps calling tools can therefore make many requests past the threshold before Pi gets control back. pi-vcc now checks active context before every provider request and starts compaction at 250,000 tokens by default. `interTurnCompactionTokens` changes the limit or disables the trigger with `null`. The interrupted tool loop resumes after compaction when `continueAfterThresholdCompact` is enabled.
 
 ## [0.7.1]

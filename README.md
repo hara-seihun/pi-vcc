@@ -163,7 +163,7 @@ Config lives at `~/.pi/agent/pi-vcc-config.json` (auto-scaffolded on first load 
 
 - **`overrideDefaultCompaction`** *(default `true`)*: when `true`, pi-vcc handles all compaction paths — `/pi-vcc`, `/compact`, and auto-threshold/overflow. Set `false` to restrict pi-vcc to `/pi-vcc` and let the rest fall through to pi core. Existing config files keep whatever value they already have.
 - **`smartKeepTail`** *(default `true`)*: when `true`, pi-vcc boosts the default `keep:1` to the largest `N` whose tail stays ≤ 25k tokens, but only when the `keep:1` tail is already small (≤ 5k tokens). Explicit `keep:N` from the user is always respected.
-- **`continueAfterThresholdCompact`** *(default `true`)*: permission for pi-vcc to continue after a successful automatic compaction. Pi 0.84.4 and later already resume Pi-owned threshold and overflow compactions, so pi-vcc does not add a second continuation there. The inter-turn trigger uses the manual compaction API and still needs this continuation on every Pi version. Set this to `false` to stop after either kind of compaction.
+- **`continueAfterThresholdCompact`** *(default `true`)*: after a successful automatic compaction, resume with the user message `your context was compacted, you now have tons of space to keep working as long as you like`. Pi queues it before the compaction callback returns, so it becomes the resumed turn rather than a later ghost turn. Set this to `false` to stop after compaction.
 - **`interTurnCompactionTokens`** *(default `250000`)*: active-context limit checked before every provider request, including requests inside one long tool loop. Set it to `null` to disable this trigger and rely on Pi's end-of-run context check.
 - **`debug`** *(default `false`)*: when `true`, each compaction writes detailed info to `/tmp/pi-vcc-debug.json` — message counts, cut boundary, summary preview, sections, token estimate calibration.
 
@@ -181,8 +181,6 @@ Local benchmarks / research comparing the ranked brief against the shipped pi-vc
 - Recall `mode:"touched"` + `#N:path` drill-down ported from
   [pi-blackhole](https://github.com/k0valik/pi-blackhole) by [@k0valik](https://github.com/k0valik),
   who also suggested the feature.
-- Invisible auto-continue pattern ported from
-  [monotykamary/pi-vcc](https://github.com/monotykamary/pi-vcc) (`tom` branch) by [@monotykamary](https://github.com/monotykamary).
 
 ## License
 

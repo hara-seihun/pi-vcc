@@ -41,8 +41,8 @@ function harness(initialTokens: number | null = DEFAULT_INTER_TURN_COMPACTION_TO
       expect(event).toBe("before_provider_request");
       handler = candidate;
     },
-    sendMessage(message: unknown, options: unknown) {
-      messages.push({ message, options });
+    sendUserMessage(content: unknown, options: unknown) {
+      messages.push({ content, options });
     },
   } as any;
   registerInterTurnCompaction(pi);
@@ -78,13 +78,8 @@ describe("inter-turn compaction", () => {
 
     run.compactions[0].onComplete();
     expect(run.messages).toEqual([{
-      message: {
-        customType: "pi-vcc-auto-continue",
-        content: [],
-        display: false,
-        details: undefined,
-      },
-      options: { triggerTurn: true, deliverAs: "followUp" },
+      content: "your context was compacted, you now have tons of space to keep working as long as you like",
+      options: { deliverAs: "followUp" },
     }]);
   });
 

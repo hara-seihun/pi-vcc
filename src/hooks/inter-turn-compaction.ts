@@ -4,7 +4,7 @@ import {
   loadSettings,
   type PiVccSettings,
 } from "../core/settings";
-import { triggerInvisibleContinue } from "./before-compact";
+import { triggerCompactionContinuation } from "./before-compact";
 
 export { DEFAULT_INTER_TURN_COMPACTION_TOKENS } from "../core/settings";
 
@@ -30,7 +30,7 @@ export function registerInterTurnCompaction(pi: ExtensionAPI): void {
     ctx.compact({
       onComplete: () => {
         compacting = false;
-        if (loadSettings().continueAfterThresholdCompact) triggerInvisibleContinue(pi);
+        if (loadSettings().continueAfterThresholdCompact) triggerCompactionContinuation(pi);
       },
       onError: () => {
         compacting = false;
