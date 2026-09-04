@@ -33,6 +33,38 @@ describe("searchEntries", () => {
     expect(searchEntries(entries, messages, "xyz123")).toEqual([]);
   });
 
+  it("finds terms that exist only in assistant thinking", () => {
+    const thoughtEntries: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "The proof is complete." },
+    ];
+    const thoughtMessages: Message[] = [{
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Use the spectral sequence degeneration marker_math_42." },
+        { type: "text", text: "The proof is complete." },
+      ],
+    } as any];
+
+    const r = searchEntries(thoughtEntries, thoughtMessages, "marker_math_42");
+    expect(r).toHaveLength(1);
+    expect(r[0].snippet).toContain("[thinking]");
+    expect(r[0].snippet).toContain("marker_math_42");
+  });
+
+  it("finds regex matches that exist only in assistant thinking", () => {
+    const thoughtEntries: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "No visible match." },
+    ];
+    const thoughtMessages: Message[] = [{
+      role: "assistant",
+      content: [{ type: "thinking", thinking: "cohomology obstruction class" }],
+    } as any];
+
+    const r = searchEntries(thoughtEntries, thoughtMessages, "cohomology.*class");
+    expect(r).toHaveLength(1);
+    expect(r[0].snippet).toContain("cohomology obstruction class");
+  });
+
   it("finds keyword beyond clip boundary in full content", () => {
     const longText = "A".repeat(400) + " hidden_keyword here";
     const longEntries: RenderedEntry[] = [

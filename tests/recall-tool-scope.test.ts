@@ -10,6 +10,17 @@ const makeSession = () => {
   const lines = [
     JSON.stringify({ type: "message", id: "m1", message: { role: "user", content: `active lineage token ${"x".repeat(350)} full-content-end` } }),
     JSON.stringify({ type: "message", id: "m2", message: { role: "user", content: "off lineage secret" } }),
+    JSON.stringify({
+      type: "message",
+      id: "m3",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "thinking-only spectral marker" },
+          { type: "text", text: "visible conclusion" },
+        ],
+      },
+    }),
   ];
   writeFileSync(file, lines.join("\n") + "\n", "utf8");
   return { dir, file };
@@ -25,8 +36,8 @@ const invoke = async (tool: any, file: string, params: Record<string, unknown>) 
   const result = await tool.execute("tool-call", params, undefined, undefined, {
     sessionManager: {
       getSessionFile: () => file,
-      getBranch: () => [{ id: "m1" }],
-      getEntries: () => [{ id: "m1" }, { id: "m2" }],
+      getBranch: () => [{ id: "m1" }, { id: "m3" }],
+      getEntries: () => [{ id: "m1" }, { id: "m2" }, { id: "m3" }],
     },
   });
   return result.content[0].text as string;
@@ -44,6 +55,25 @@ describe("vcc_recall scope", () => {
       const all = await invoke(tool, file, { query: "secret", scope: "all" });
       expect(all).toContain("scope: all");
       expect(all).toContain("off lineage secret");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("searches and expands assistant thinking from session JSONL", async () => {
+    const { dir, file } = makeSession();
+    try {
+      const tool = register();
+
+      const search = await invoke(tool, file, { query: "spectral marker" });
+      expect(search).toContain("#2 [assistant]");
+      expect(search).toContain("[thinking]");
+      expect(search).toContain("thinking-only spectral marker");
+
+      const expanded = await invoke(tool, file, { expand: [2] });
+      expect(expanded).toContain("[thinking]");
+      expect(expanded).toContain("thinking-only spectral marker");
+      expect(expanded).toContain("visible conclusion");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

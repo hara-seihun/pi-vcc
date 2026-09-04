@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { textParts, textOf, clip, firstLine, extractToolCallArgsText } from "../src/core/content";
+import { textParts, textOf, recallTextOf, clip, firstLine, extractToolCallArgsText } from "../src/core/content";
 
 describe("textParts", () => {
   it("returns [] for undefined content", () => {
@@ -27,6 +27,28 @@ describe("textParts", () => {
 describe("textOf", () => {
   it("returns empty string for undefined content", () => {
     expect(textOf(undefined as any)).toBe("");
+  });
+});
+
+describe("recallTextOf", () => {
+  it("includes and labels assistant thinking in content order", () => {
+    const content = [
+      { type: "thinking" as const, thinking: "derive the invariant" },
+      { type: "text" as const, text: "The invariant holds." },
+    ];
+
+    expect(recallTextOf(content)).toBe(
+      "[thinking]\nderive the invariant\nThe invariant holds.",
+    );
+  });
+
+  it("ignores empty thinking and non-text content", () => {
+    const content = [
+      { type: "thinking" as const, thinking: "" },
+      { type: "toolCall" as const, name: "x", id: "1", arguments: {} },
+    ];
+
+    expect(recallTextOf(content)).toBe("");
   });
 });
 

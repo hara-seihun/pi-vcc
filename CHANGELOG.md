@@ -4,6 +4,10 @@ All notable changes to `@sting8k/pi-vcc` are documented in this file.
 
 ## Unreleased
 
+### Features
+
+- **Recall searches assistant thinking** - `vcc_recall` now indexes plaintext `thinking` blocks from session JSONL, labels thinking passages in snippets, and includes them in full entry expansion. This covers full reasoning or provider-generated reasoning summaries when Pi persisted them; encrypted reasoning remains unavailable.
+
 ### Fixes
 
 - **Compaction: make automatic continuation visible** - A successful automatic compaction now resumes with the user message `your context was compacted, you now have tons of space to keep working as long as you like`. The message replaces the hidden empty continuation, so transcripts explain why the prior model request was aborted and agents know they have room to keep working. Pi receives it before the compaction callback returns, which avoids the delayed ghost turn fixed in 0.7.1.

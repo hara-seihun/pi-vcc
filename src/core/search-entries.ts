@@ -1,6 +1,6 @@
 import type { Message } from "@earendil-works/pi-ai";
 import type { RenderedEntry } from "./render-entries";
-import { textOf, isContentBearing, extractToolCallText, extractToolCallArgsText, clip } from "./content";
+import { recallTextOf, isContentBearing, extractToolCallText, extractToolCallArgsText, clip } from "./content";
 
 export interface SearchHit extends RenderedEntry {
   /** Context snippet around the first matched term (only when query provided) */
@@ -278,10 +278,10 @@ const toolCallArgsText = (content: Message["content"]): string => {
 };
 
 /**
- * Build full searchable text for a message: text parts plus toolCall
- * arguments (bash command, Write/Edit content, etc.) so a match that only
- * exists in a tool call's arguments is still findable and its snippet is
- * derived from the same text.
+ * Build full searchable text for a message: visible text, assistant thinking,
+ * and toolCall arguments (bash command, Write/Edit content, etc.) so a match
+ * that only exists in thinking or a tool call's arguments is still findable
+ * and its snippet is derived from the same text.
  *
  * The recall tool's own toolResult is excluded (searchable text ""): it
  * echoes back `N matches for "<query>"` from the *previous* recall call, so
@@ -298,7 +298,7 @@ const fullText = (msg: Message): string => {
   if (msg.role === "toolResult" && msg.toolName?.toLowerCase() === RECALL_TOOL_NAME) {
     return "";
   }
-  const text = textOf(msg.content);
+  const text = recallTextOf(msg.content);
   const argsText = toolCallArgsText(msg.content);
   return argsText ? `${text}\n${argsText}` : text;
 };

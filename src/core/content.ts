@@ -50,6 +50,26 @@ export const textOf = (content: Message["content"]): string =>
   textParts(content).join("\n");
 
 /**
+ * Text available to recall from a message. Assistant thinking is persisted as
+ * ordinary plaintext content in Pi session JSONL, so keep it searchable and
+ * label it in snippets instead of silently dropping it.
+ */
+export const recallTextOf = (content: Message["content"]): string => {
+  if (!content) return "";
+  if (typeof content === "string") return content;
+
+  return content
+    .flatMap((part) => {
+      if (part.type === "text") return [part.text];
+      if (part.type === "thinking" && typeof part.thinking === "string" && part.thinking) {
+        return [`[thinking]\n${part.thinking}`];
+      }
+      return [];
+    })
+    .join("\n");
+};
+
+/**
  * Check if tool call arguments contain content-bearing data.
  *
  * A call is content-bearing if it has a path argument AND at least one

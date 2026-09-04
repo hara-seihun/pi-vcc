@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { renderMessage } from "../src/core/render-entries";
 import type { Message } from "@earendil-works/pi-ai";
-import { userMsg, assistantText, assistantWithToolCall, toolResult } from "./fixtures";
+import { userMsg, assistantText, assistantWithThinking, assistantWithToolCall, toolResult } from "./fixtures";
 
 describe("renderMessage", () => {
   it("renders user message", () => {
@@ -13,6 +13,11 @@ describe("renderMessage", () => {
     const r = renderMessage(assistantText("done"), 1);
     expect(r.role).toBe("assistant");
     expect(r.summary).toBe("done");
+  });
+
+  it("renders assistant thinking with an explicit label", () => {
+    const r = renderMessage(assistantWithThinking("done", "derive the invariant"), 2, true);
+    expect(r.summary).toBe("[thinking]\nderive the invariant\ndone");
   });
 
   it("renders tool result", () => {

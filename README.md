@@ -29,7 +29,7 @@ Inspired by [VCC](https://github.com/lllyasviel/VCC) **(View-oriented Conversati
 - **Brief transcript** — chronological conversation flow, each tool call collapsed to a one-liner with `(#N)` refs, text truncated to keep it compact
 - **5 semantic sections** — session goal, files & changes, commits, outstanding context, user preferences
 - **Bounded merge** — rolling sections re-capped after merge instead of growing unbounded
-- **Lossless recall** — `vcc_recall` reads raw session JSONL, so active-lineage history stays searchable across compactions
+- **Lossless recall** — `vcc_recall` reads raw session JSONL, so visible messages, assistant thinking, and active-lineage history stay searchable across compactions
 - **Scoped recall** — default search is active lineage; use `scope:"all"` / `scope:all` to intentionally search across all lineages
 - **Regex search** — `vcc_recall` supports regex patterns (`hook|inject`, `fail.*build`) and OR-ranked multi-word queries
 - **Result ranking** — search results ranked by term relevance, rare terms weighted higher than common ones
@@ -117,7 +117,7 @@ Sections appear only when relevant — a session with no git commits won't have 
 
 Pi's default compaction discards old messages permanently. After compaction, the agent only sees the summary.
 
-`vcc_recall` bypasses this by reading the raw session JSONL file directly, so anything dropped by compaction stays reachable. By default it covers the active conversation lineage, regardless of how many compactions have happened. Use `scope:"all"` to also reach messages from other branches, such as turns that were edited or retried. Scope is limited to the current session — earlier sessions are not searchable.
+`vcc_recall` bypasses this by reading the raw session JSONL file directly, so anything dropped by compaction stays reachable. Search includes plaintext assistant `thinking` blocks, and results label those passages as `[thinking]`. This covers the reasoning text or reasoning summary that the provider persisted; encrypted provider reasoning cannot be searched. By default recall covers the active conversation lineage, regardless of how many compactions have happened. Use `scope:"all"` to also reach messages from other branches, such as turns that were edited or retried. Scope is limited to the current session — earlier sessions are not searchable.
 
 **Plain keywords work best.** Multi-word queries are OR-matched and ranked by relevance; a regex pattern is also accepted, and if it matches nothing the query falls back to keyword search:
 
@@ -140,7 +140,7 @@ Manual slash command:
 2. **Calibrate** — estimate `charsPerToken` from `preparation.tokensBefore` vs actual message chars (falls back to heuristic `4 chars/token`)
 3. **Smart keep** — if the `keep:1` tail is small (< 5k tokens), boost keep to the largest N whose tail stays ≤ 25k tokens; explicit `keep:N` is always respected
 4. **Build cut** — split at the keep boundary; everything before is summarized, the tail stays intact
-5. **Normalize** — raw Pi messages → uniform blocks (user, assistant, tool_call, tool_result, thinking)
+5. **Normalize** — raw Pi messages → uniform compactable blocks (user, visible assistant text, tool calls, tool results); raw assistant thinking remains available to recall
 6. **Filter noise** — strip system messages, empty blocks
 7. **Build sections** — extract goal, file paths, commits, outstanding context, preferences
 8. **Brief transcript** — chronological conversation flow, tool calls collapsed to one-liners, text truncated
