@@ -5,6 +5,7 @@ import { compileRanked } from "../core/summarize";
 import { parseKeepAndPrompt, PI_VCC_COMPACT_INSTRUCTION } from "../core/compact-args";
 import { loadSettings, type PiVccSettings } from "../core/settings";
 import { calibrateCharsPerToken, estimateMessageContentChars, estimateMessageContentTokens, estimateTokensFromChars } from "../core/token-estimate";
+import { resolveThinkingAnchor } from "../core/thinking-anchor";
 import type { PiVccCompactionDetails } from "../details";
 import type { CompactionReason } from "../types";
 
@@ -20,6 +21,8 @@ export interface CompactionStats {
   keepFallbackToCompactAll: boolean;
   /** Set when the tail came from a token-budget cut instead of a user-turn cut. */
   budgetCut?: BudgetCutKind;
+  /** True when the cut was moved earlier to keep the last thinking block. */
+  thinkingAnchored?: boolean;
   keptTokensEst: number;
   /** True when smart-keep boosted the default keep beyond 1. */
   smartKeepAdjusted?: boolean;
@@ -58,6 +61,9 @@ export const formatCompactionStats = (stats: CompactionStats): string => {
   const notes: string[] = [`summarized ${stats.summarized}`];
   if (stats.smartKeepAdjusted) {
     notes.push("smart-keep");
+  }
+  if (stats.thinkingAnchored) {
+    notes.push("kept last thinking");
   }
   return `pi-vcc: kept ${stats.keptUserTurns}/${stats.totalUserTurns} turns, ~${formatTokens(stats.keptTokensEst)} tok (${notes.join(", ")}).`;
 };
@@ -173,7 +179,9 @@ const toLiveMessage = (entry: any): { role: string; content: unknown; [key: stri
 
 export type OwnCutCancelReason =
   | "no_live_messages"
-  | "too_few_live_messages";
+  | "too_few_live_messages"
+  | "awaiting_completion"
+  | "thinking_anchor_is_window";
 
 export type OwnCutResult =
   | {
@@ -186,10 +194,11 @@ export type OwnCutResult =
       requestedKeepUserTurns: number;
       keepFallbackToCompactAll: boolean;
       budgetCut?: BudgetCutKind;
+      thinkingAnchored?: boolean;
     }
   | { ok: false; reason: OwnCutCancelReason };
 
-const collectLiveMessages = (branchEntries: any[]): EntryWithMessage[] => {
+export const collectLiveMessages = (branchEntries: any[]): EntryWithMessage[] => {
   // Find the last compaction entry and its firstKeptEntryId
   let lastCompactionIdx = -1;
   let lastKeptId: string | undefined;
@@ -348,6 +357,44 @@ export const applyTailBudget = (
   return budgetResult(idx, "oversized_tail");
 };
 
+/**
+ * Thinking anchor (see core/thinking-anchor.ts). Applied after every other cut,
+ * including explicit keep:N and keep:0, because the point is that the model's
+ * latest reasoning is never summarised away regardless of who asked.
+ *
+ * - Newest assistant output incomplete → cancel with `awaiting_completion`,
+ *   unless `force` (overflow: the request cannot be sent without compacting),
+ *   in which case the cut is pulled back to the start of the incomplete run.
+ * - Otherwise the cut moves earlier to the anchor when it would have fallen after it.
+ * - If the anchor is the very first live message there is nothing to summarise.
+ */
+export const applyThinkingAnchor = (
+  branchEntries: any[],
+  cut: OwnCutResult,
+  opts: { force?: boolean } = {},
+): OwnCutResult => {
+  if (!cut.ok) return cut;
+  const live = collectLiveMessages(branchEntries);
+  const { defer, anchor } = resolveThinkingAnchor(live);
+  if (defer && !opts.force) return { ok: false, reason: "awaiting_completion" };
+  if (anchor === null) return cut;
+  const currentCut = cut.compactAll ? live.length : cut.messages.length;
+  if (anchor >= currentCut) return cut;
+  if (anchor <= 0) return { ok: false, reason: "thinking_anchor_is_window" };
+  return {
+    ok: true,
+    messages: live.slice(0, anchor).map((m) => m.message),
+    firstKeptEntryId: live[anchor].entry.id,
+    compactAll: false,
+    keptUserTurns: live.slice(anchor).filter((m) => m.message.role === "user").length,
+    totalUserTurns: live.filter((m) => m.message.role === "user").length,
+    requestedKeepUserTurns: cut.requestedKeepUserTurns,
+    keepFallbackToCompactAll: false,
+    budgetCut: cut.budgetCut,
+    thinkingAnchored: true,
+  };
+};
+
 // ── smart keep-tail: boost default keep when tail is small ──
 
 export const MIN_SMART_TAIL_TOKENS = 5_000;
@@ -436,6 +483,8 @@ export const resolveSmartKeepUserTurns = (opts: ResolveSmartKeepOptions): Resolv
 const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
   no_live_messages: "pi-vcc: Nothing to compact (no live messages)",
   too_few_live_messages: "pi-vcc: Too few messages to compact",
+  awaiting_completion: "pi-vcc: Waiting for the current response to finish before compacting (last output is thinking only)",
+  thinking_anchor_is_window: "pi-vcc: Nothing to compact before the last thinking block",
 };
 
 export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
@@ -480,6 +529,10 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
     if (ownCut.ok && !keepUserTurnsExplicit) {
       ownCut = applyTailBudget(branchEntries as any[], ownCut, { charsPerToken: tokenEstimate.charsPerToken });
     }
+    // Always last: the model's newest reasoning is never summarised away, and
+    // compaction waits for an in-progress response unless the request cannot be
+    // sent at all (overflow).
+    ownCut = applyThinkingAnchor(branchEntries as any[], ownCut, { force: reason === "overflow" });
     if (!ownCut.ok) {
       const lastComp = [...branchEntries].reverse().find((e: any) => e.type === "compaction");
       const lastCompIdx = lastComp ? (branchEntries as any[]).indexOf(lastComp) : -1;
@@ -577,6 +630,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
       smartKeepAdjusted: smartKeep.smartAdjusted,
       smartFromKeep: smartKeep.fromKeep,
       budgetCut: ownCut.ok ? ownCut.budgetCut : undefined,
+      thinkingAnchored: ownCut.thinkingAnchored,
       reason,
       willRetry,
     };
@@ -630,6 +684,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI) => {
     dbg(config, {
       usedOwnCut: true,
       budgetCut: ownCut.budgetCut,
+      thinkingAnchored: ownCut.thinkingAnchored,
       compaction: { reason, willRetry },
       messagesToSummarize: agentMessages.length,
       messagesPreviewHead: agentMessages.slice(0, 3).map((m: any) => ({ role: m.role, preview: previewContent(m.content) })),

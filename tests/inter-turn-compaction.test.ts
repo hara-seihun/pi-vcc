@@ -46,13 +46,16 @@ function harness(initialTokens: number | null = DEFAULT_INTER_TURN_COMPACTION_TO
     },
   } as any;
   registerInterTurnCompaction(pi);
+  let branch: unknown[] | undefined;
   const ctx = {
     getContextUsage: () => ({ tokens }),
     compact: (options: unknown) => compactions.push(options),
+    sessionManager: { getBranch: () => branch },
   };
   return {
     fire: () => handler!({}, ctx),
     setTokens: (value: number | null) => { tokens = value; },
+    setBranch: (value: unknown[] | undefined) => { branch = value; },
     compactions,
     messages,
   };
@@ -90,6 +93,32 @@ describe("inter-turn compaction", () => {
     run.compactions[0].onError(new Error("failed"));
     run.fire();
     expect(run.compactions).toHaveLength(2);
+  });
+
+  test("does not abort a turn whose newest output is still thinking only", () => {
+    setConfig({ ...DEFAULT_SETTINGS });
+    const run = harness();
+    const think = (id: string, extra: unknown[] = [], stopReason = "length") => ({
+      id, type: "message",
+      message: { role: "assistant", stopReason, content: [{ type: "thinking", thinking: "t".repeat(1000) }, ...extra] },
+    });
+    run.setBranch([
+      { id: "u1", type: "message", message: { role: "user", content: "go" } },
+      think("a1"),
+      { id: "u2", type: "message", message: { role: "user", content: "Your last turn was cut off" } },
+    ]);
+    run.fire();
+    expect(run.compactions).toHaveLength(0);
+
+    run.setBranch([
+      { id: "u1", type: "message", message: { role: "user", content: "go" } },
+      think("a1"),
+      { id: "u2", type: "message", message: { role: "user", content: "Your last turn was cut off" } },
+      think("a2", [{ type: "toolCall", id: "tc", name: "bash", arguments: {} }], "toolUse"),
+      { id: "t2", type: "message", message: { role: "toolResult", content: [{ type: "text", text: "ok" }] } },
+    ]);
+    run.fire();
+    expect(run.compactions).toHaveLength(1);
   });
 
   test("null disables inter-turn compaction", () => {

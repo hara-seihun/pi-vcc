@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, beforeAll, afterAll } fr
 import { existsSync, unlinkSync, writeFileSync, readFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { COMPACTION_CONTINUATION_MESSAGE, registerBeforeCompactHook, PI_VCC_COMPACT_INSTRUCTION, getLastCompactionStats, formatCompactionStats, buildOwnCut, applyTailBudget } from "../src/hooks/before-compact";
+import { COMPACTION_CONTINUATION_MESSAGE, registerBeforeCompactHook, PI_VCC_COMPACT_INSTRUCTION, getLastCompactionStats, formatCompactionStats, buildOwnCut, applyTailBudget, applyThinkingAnchor } from "../src/hooks/before-compact";
 
 let tmpDir: string;
 let CONFIG_PATH: string;
@@ -682,6 +682,135 @@ describe("registerBeforeCompactHook: budget-cut hook integration", () => {
     expect(result.compaction.firstKeptEntryId).toBe("u2");
     expect(getLastCompactionStats()!.budgetCut).toBeUndefined();
     expect(getLastCompactionStats()!.keepUserTurnsExplicit).toBe(true);
+  });
+});
+
+describe("registerBeforeCompactHook: thinking anchor", () => {
+  afterEach(() => {
+    if (existsSync(CONFIG_PATH)) unlinkSync(CONFIG_PATH);
+  });
+
+  const thinkMsg = (id: string, chars: number, extra: any[] = [], stopReason = "stop") => ({
+    id,
+    type: "message",
+    message: {
+      role: "assistant",
+      stopReason,
+      content: [{ type: "thinking", thinking: "t".repeat(chars) }, ...extra],
+    },
+  });
+  const call = { type: "toolCall", id: "tc", name: "bash", arguments: {} };
+  const textBlock = { type: "text", text: "done" };
+
+  test("threshold compaction waits while the newest output is thinking only", () => {
+    setConfig({ debug: false, overrideDefaultCompaction: true });
+    const { pi, invokeBefore, notifyCalls } = createMockPi();
+    registerBeforeCompactHook(pi);
+    const entries = [
+      msg("u1", "user", "one"),
+      msg("a1", "assistant", "reply"),
+      msg("u2", "user", "two"),
+      thinkMsg("a2", 147_000, [], "length"),
+      msg("u3", "user", "Your last turn was cut off"),
+      { id: "a3", type: "message", message: { role: "assistant", stopReason: "aborted", content: [] } },
+    ];
+    const result = invokeBefore(makeEvent(entries, undefined, { reason: "threshold", willRetry: false }));
+    expect(result).toEqual({ cancel: true });
+    expect(notifyCalls[0].msg).toContain("Waiting for the current response");
+  });
+
+  test("overflow compaction cannot wait: it keeps the incomplete thinking instead", () => {
+    setConfig({ debug: false, overrideDefaultCompaction: true });
+    const { pi, invokeBefore } = createMockPi();
+    registerBeforeCompactHook(pi);
+    const entries = [
+      msg("u1", "user", "one"),
+      msg("a1", "assistant", "reply"),
+      msg("u2", "user", "two"),
+      msg("a2", "assistant", "x".repeat(200_000)),
+      msg("u3", "user", "three"),
+      thinkMsg("a3", 147_000, [], "length"),
+      msg("u4", "user", "Your last turn was cut off"),
+    ];
+    const result = invokeBefore(makeEvent(entries, undefined, { reason: "overflow", willRetry: true }));
+    expect(result.cancel).toBeUndefined();
+    const ids = entries.map((e) => e.id);
+    expect(ids.indexOf(result.compaction.firstKeptEntryId)).toBeLessThanOrEqual(ids.indexOf("a3"));
+
+    // Directly: a compact-all cut under force is pulled back to the incomplete thinking.
+    const forced = applyThinkingAnchor(entries, buildOwnCut(entries, 0), { force: true });
+    expect(forced.ok && forced.firstKeptEntryId).toBe("a3");
+    expect(forced.ok && forced.thinkingAnchored).toBe(true);
+    const deferred = applyThinkingAnchor(entries, buildOwnCut(entries, 0));
+    expect(deferred).toEqual({ ok: false, reason: "awaiting_completion" });
+  });
+
+  test("default cut moves back to the cut-off thinking the next message completed", () => {
+    setConfig({ debug: false, overrideDefaultCompaction: true });
+    const { pi, invokeBefore } = createMockPi();
+    registerBeforeCompactHook(pi);
+    const entries = [
+      msg("u1", "user", "one"),
+      msg("a1", "assistant", "reply"),
+      msg("u2", "user", "two"),
+      thinkMsg("a2", 150_000, [], "length"),
+      msg("u3", "user", "Your last turn was cut off"),
+      thinkMsg("a3", 58_000, [textBlock, call], "toolUse"),
+      msg("t3", "toolResult", "ok"),
+    ];
+    // keep:1 alone would keep from u3 and summarise a2 away.
+    const result = invokeBefore(makeEvent(entries, undefined, { reason: "threshold", willRetry: false }));
+    expect(result.compaction.firstKeptEntryId).toBe("a2");
+    expect(getLastCompactionStats()!.thinkingAnchored).toBe(true);
+    expect(formatCompactionStats(getLastCompactionStats()!)).toContain("kept last thinking");
+  });
+
+  test("explicit keep:0 still keeps the last thinking block", () => {
+    setConfig({ debug: false, overrideDefaultCompaction: false });
+    const { pi, invokeBefore } = createMockPi();
+    registerBeforeCompactHook(pi);
+    const entries = [
+      msg("u1", "user", "one"),
+      msg("a1", "assistant", "reply"),
+      msg("u2", "user", "two"),
+      thinkMsg("a2", 5_000, [call], "toolUse"),
+      msg("t2", "toolResult", "ok"),
+    ];
+    const result = invokeBefore(makeEvent(entries, `${PI_VCC_COMPACT_INSTRUCTION} keep:0`));
+    expect(result.compaction.firstKeptEntryId).toBe("a2");
+  });
+
+  test("tool loop where every step thinks: cut stays at the user anchor when it is already earlier", () => {
+    setConfig({ debug: false, overrideDefaultCompaction: true });
+    const { pi, invokeBefore } = createMockPi();
+    registerBeforeCompactHook(pi);
+    const entries = [
+      msg("u1", "user", "one"),
+      msg("a1", "assistant", "reply"),
+      msg("u2", "user", "two"),
+      thinkMsg("a2", 500, [call], "toolUse"),
+      msg("t2", "toolResult", "ok"),
+      thinkMsg("a3", 500, [call], "toolUse"),
+      msg("t3", "toolResult", "ok"),
+    ];
+    const result = invokeBefore(makeEvent(entries, undefined, { reason: "threshold", willRetry: false }));
+    expect(result.compaction.firstKeptEntryId).toBe("u2");
+    expect(getLastCompactionStats()!.thinkingAnchored).toBeUndefined();
+  });
+
+  test("anchor at the first live message leaves nothing to compact", () => {
+    setConfig({ debug: false, overrideDefaultCompaction: true });
+    const { pi, invokeBefore, notifyCalls } = createMockPi();
+    registerBeforeCompactHook(pi);
+    const entries = [
+      thinkMsg("a1", 150_000, [], "length"),
+      msg("u1", "user", "Your last turn was cut off"),
+      thinkMsg("a2", 500, [call], "toolUse"),
+      msg("t2", "toolResult", "ok"),
+    ];
+    const result = invokeBefore(makeEvent(entries, undefined, { reason: "threshold", willRetry: false }));
+    expect(result).toEqual({ cancel: true });
+    expect(notifyCalls[0].msg).toContain("Nothing to compact before the last thinking block");
   });
 });
 

@@ -140,6 +140,7 @@ Manual slash command:
 2. **Calibrate** — estimate `charsPerToken` from `preparation.tokensBefore` vs actual message chars (falls back to heuristic `4 chars/token`)
 3. **Smart keep** — if the `keep:1` tail is small (< 5k tokens), boost keep to the largest N whose tail stays ≤ 25k tokens; explicit `keep:N` is always respected
 4. **Build cut** — split at the keep boundary; everything before is summarized, the tail stays intact
+4b. **Thinking anchor** — the kept tail always starts at or before the model's last thinking block, whichever cut asked for it (default, smart keep, budget cut, or explicit `keep:N`). A thinking block cut off by the output limit and completed by the next assistant message counts as one unit, so the cut-off reasoning survives too. Compaction waits while the newest assistant output is still thinking-only or a length-truncated text; the inter-turn trigger skips those requests instead of aborting the turn, and `/compact` or a threshold compaction cancels with a notice. Only an overflow compaction (the request cannot be sent) proceeds, and it still keeps the incomplete block.
 5. **Normalize** — raw Pi messages → uniform compactable blocks (user, visible assistant text, tool calls, tool results); raw assistant thinking remains available to recall
 6. **Filter noise** — strip system messages, empty blocks
 7. **Build sections** — extract goal, file paths, commits, outstanding context, preferences
