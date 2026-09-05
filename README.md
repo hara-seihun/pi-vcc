@@ -158,6 +158,10 @@ Config lives at `~/.pi/agent/pi-vcc-config.json` (auto-scaffolded on first load 
   "smartKeepTail": true,
   "continueAfterThresholdCompact": true,
   "interTurnCompactionTokens": 250000,
+  "interTurnCompactionTokensByModel": {
+    "openai/gpt-6-astra": 500000,
+    "openai-codex/gpt-6-astra": 500000
+  },
   "debug": false
 }
 ```
@@ -166,6 +170,7 @@ Config lives at `~/.pi/agent/pi-vcc-config.json` (auto-scaffolded on first load 
 - **`smartKeepTail`** *(default `true`)*: when `true`, pi-vcc boosts the default `keep:1` to the largest `N` whose tail stays ≤ 25k tokens, but only when the `keep:1` tail is already small (≤ 5k tokens). Explicit `keep:N` from the user is always respected.
 - **`continueAfterThresholdCompact`** *(default `true`)*: after a successful automatic compaction, resume with the user message `your context was compacted, you now have tons of space to keep working as long as you like`. Pi queues it before the compaction callback returns, so it becomes the resumed turn rather than a later ghost turn. Set this to `false` to stop after compaction.
 - **`interTurnCompactionTokens`** *(default `250000`)*: active-context limit checked before every provider request, including requests inside one long tool loop. Set it to `null` to disable this trigger and rely on Pi's end-of-run context check.
+- **`interTurnCompactionTokensByModel`** defaults to an empty object. Keys are `provider/model` and values are token limits or `null`. The example above raises OpenAI Astra to 500,000 while other models keep the 250,000 default. Numbered account aliases such as `openai-codex-3` use the `openai-codex` entry unless an exact account entry exists. Pi-vcc reads the active model and config before every provider request, so switching models changes the threshold immediately.
 - **`debug`** *(default `false`)*: when `true`, each compaction writes detailed info to `/tmp/pi-vcc-debug.json` — message counts, cut boundary, summary preview, sections, token estimate calibration.
 
 ## Benchmarks

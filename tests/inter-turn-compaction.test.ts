@@ -48,6 +48,7 @@ function harness(initialTokens: number | null = DEFAULT_INTER_TURN_COMPACTION_TO
   registerInterTurnCompaction(pi);
   let branch: unknown[] | undefined;
   const ctx = {
+    model: undefined as { provider: string; id: string } | undefined,
     getContextUsage: () => ({ tokens }),
     compact: (options: unknown) => compactions.push(options),
     sessionManager: { getBranch: () => branch },
@@ -55,6 +56,7 @@ function harness(initialTokens: number | null = DEFAULT_INTER_TURN_COMPACTION_TO
   return {
     fire: () => handler!({}, ctx),
     setTokens: (value: number | null) => { tokens = value; },
+    setModel: (provider: string, id: string) => { ctx.model = { provider, id }; },
     setBranch: (value: unknown[] | undefined) => { branch = value; },
     compactions,
     messages,
@@ -70,6 +72,60 @@ describe("inter-turn compaction", () => {
     run.setTokens(DEFAULT_INTER_TURN_COMPACTION_TOKENS);
     run.fire();
     expect(run.compactions).toHaveLength(1);
+  });
+
+  test("uses Astra's threshold for OpenAI and numbered account aliases", () => {
+    setConfig({
+      ...DEFAULT_SETTINGS,
+      interTurnCompactionTokensByModel: {
+        "openai/gpt-6-astra": 500_000,
+        "openai-codex/gpt-6-astra": 500_000,
+      },
+    });
+    for (const provider of ["openai", "openai-codex", "openai-codex-3"]) {
+      const run = harness(499_999);
+      run.setModel(provider, "gpt-6-astra");
+      run.fire();
+      expect(run.compactions).toHaveLength(0);
+      run.setTokens(500_000);
+      run.fire();
+      expect(run.compactions).toHaveLength(1);
+    }
+  });
+
+  test("re-evaluates the threshold on model switches and configuration changes", () => {
+    const config = {
+      ...DEFAULT_SETTINGS,
+      interTurnCompactionTokensByModel: { "openai-codex/gpt-6-astra": 500_000 },
+    };
+    setConfig(config);
+    const run = harness(300_000);
+    run.setModel("openai-codex-7", "gpt-6-astra");
+    run.fire();
+    expect(run.compactions).toHaveLength(0);
+    run.setModel("openai-codex-7", "gpt-5.6-luna");
+    run.fire();
+    expect(run.compactions).toHaveLength(1);
+    run.compactions[0].onComplete();
+    run.setModel("openai-codex-7", "gpt-6-astra");
+    run.fire();
+    expect(run.compactions).toHaveLength(1);
+    setConfig({ ...config, interTurnCompactionTokensByModel: {} });
+    run.fire();
+    expect(run.compactions).toHaveLength(2);
+  });
+
+  test("keeps overrides provider-specific and lets exact account overrides disable compaction", () => {
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      interTurnCompactionTokensByModel: {
+        "openai-codex/gpt-6-astra": 500_000,
+        "openai-codex-2/gpt-6-astra": null,
+      },
+    };
+    expect(interTurnCompactionThreshold(settings, { provider: "anthropic", id: "gpt-6-astra" })).toBe(250_000);
+    expect(interTurnCompactionThreshold(settings, { provider: "openai-codex-2", id: "gpt-6-astra" })).toBeNull();
+    expect(interTurnCompactionThreshold(settings, { provider: "anthropic", id: "claude-opus-5" })).toBe(250_000);
   });
 
   test("keeps one compaction in flight and resumes the interrupted tool loop", () => {

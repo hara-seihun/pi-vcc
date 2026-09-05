@@ -9,8 +9,18 @@ import { collectLiveMessages, triggerCompactionContinuation } from "./before-com
 
 export { DEFAULT_INTER_TURN_COMPACTION_TOKENS } from "../core/settings";
 
-export function interTurnCompactionThreshold(settings: PiVccSettings): number | null {
-  const value = settings.interTurnCompactionTokens;
+export function interTurnCompactionThreshold(
+  settings: PiVccSettings,
+  model?: { provider: string; id: string },
+): number | null {
+  let value: unknown = settings.interTurnCompactionTokens;
+  if (model) {
+    const overrides = settings.interTurnCompactionTokensByModel ?? {};
+    const exact = `${model.provider}/${model.id}`;
+    const family = `${model.provider.replace(/-\d+$/, "")}/${model.id}`;
+    if (Object.hasOwn(overrides, exact)) value = overrides[exact];
+    else if (Object.hasOwn(overrides, family)) value = overrides[family];
+  }
   if (value === null) return null;
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
   return Math.floor(value);
@@ -36,7 +46,7 @@ export function registerInterTurnCompaction(pi: ExtensionAPI): void {
     const settings = loadSettings();
     if (!settings.overrideDefaultCompaction) return;
 
-    const threshold = interTurnCompactionThreshold(settings);
+    const threshold = interTurnCompactionThreshold(settings, ctx.model);
     const tokens = ctx.getContextUsage()?.tokens;
     if (compacting || threshold === null || tokens === null || tokens === undefined || tokens < threshold) return;
     if (shouldDeferForIncompleteOutput(ctx as any)) return;

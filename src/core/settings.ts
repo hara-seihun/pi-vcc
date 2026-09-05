@@ -5,8 +5,6 @@ import { dirname, join } from "path";
 export const SETTINGS_PATH_DEFAULT = join(homedir(), ".pi", "agent", "pi-vcc-config.json");
 export const DEFAULT_INTER_TURN_COMPACTION_TOKENS = 250_000;
 const settingsPath = (): string => process.env.PI_VCC_CONFIG_PATH ?? SETTINGS_PATH_DEFAULT;
-/** Backwards-compat export. Resolves at access time, not import time. */
-export const SETTINGS_PATH = settingsPath();
 
 export interface PiVccSettings {
   /**
@@ -41,6 +39,8 @@ export interface PiVccSettings {
    * many tokens. Set to null to rely on Pi's end-of-run threshold check.
    */
   interTurnCompactionTokens: number | null;
+  /** Per-provider/model thresholds, including numbered provider account aliases. */
+  interTurnCompactionTokensByModel: Record<string, number | null>;
   /** Write debug snapshot to /tmp/pi-vcc-debug.json on each compaction. */
   debug: boolean;
 }
@@ -50,6 +50,7 @@ export const DEFAULT_SETTINGS: PiVccSettings = {
   smartKeepTail: true,
   continueAfterThresholdCompact: true,
   interTurnCompactionTokens: DEFAULT_INTER_TURN_COMPACTION_TOKENS,
+  interTurnCompactionTokensByModel: {},
   debug: false,
 };
 
