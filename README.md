@@ -55,6 +55,8 @@ Or try without installing:
 pi -e https://github.com/sting8k/pi-vcc
 ```
 
+Pi 0.85.0's SDK entry point imports `@earendil-works/pi-server` without declaring it. Pi-vcc declares that peer explicitly so a clean install can load `convertToLlm`; it does not rely on a host-specific `node_modules` link.
+
 ## Usage
 
 pi-vcc compacts between provider requests at 250,000 active-context tokens by default, before a long tool loop can exhaust its context window. It also handles Pi's end-of-run threshold and overflow compactions, and supports manual commands.
